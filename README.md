@@ -1,3 +1,5 @@
 # mcarbart
 
-Not audited, do not use
+> [!WARNING]
+> The code is auto-generated and have not been thoroughly audited.
+> Do not use for anything.
