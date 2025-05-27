@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BART Departures - MacArthur</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the app */
+        body {
+            font-family: 'Inter', sans-serif; /* Using Inter font as per guidelines */
+        }
+        .line-color-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            display: inline-block;
+            flex-shrink: 0; /* Prevent shrinking in flex container */
+        }
+        /* Add a subtle animation for loading */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .loading-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        /* Ensure buttons and inputs are accessible and look good */
+        input[type="password"], select, button {
+            padding: 0.75rem;
+            border-radius: 0.5rem; /* Rounded corners */
+        }
+        button {
+            transition: background-color 0.3s ease;
+        }
+        select {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        /* Custom scrollbar for departures list if it overflows */
+        .departures-sub-section-content::-webkit-scrollbar { 
+            width: 6px;
+        }
+        .departures-sub-section-content::-webkit-scrollbar-track { 
+            background: #374151; 
+            border-radius: 0.375rem;
+        }
+        .departures-sub-section-content::-webkit-scrollbar-thumb { 
+            background: #6b7280; 
+            border-radius: 0.375rem;
+        }
+        .departures-sub-section-content::-webkit-scrollbar-thumb:hover { 
+            background: #9ca3af; 
+        }
+        .column-min-height {
+            min-height: 200px; 
+        }
+        .destination-subheader { 
+            font-size: 0.95rem; 
+            font-weight: 600;
+            color: #d1d5db; /* text-gray-300 */
+            padding-bottom: 0.4rem;
+            margin-top: 0.6rem;
+            border-bottom: 1px solid #4b5563; /* border-gray-600 */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center pt-6 sm:pt-8 px-4 pb-8">
+
+    <div id="token-section" class="w-full max-w-md p-6 bg-gray-800 rounded-lg shadow-xl mb-8">
+        <h2 class="text-2xl font-semibold mb-4 text-center text-white">Enter 511 API Token</h2>
+        <p class="text-sm text-gray-400 mb-1 text-center">
+            An API token is required to fetch live BART data.
+        </p>
+        <p class="text-sm text-gray-400 mb-4 text-center">
+            Get one from <a href="https://511.org/developers/list/tokens" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 underline">511.org Developers</a>.
+        </p>
+        <p class="text-xs text-gray-500 mb-3 text-center">
+            Your token is stored in session storage (cleared when tab closes).
+        </p>
+        <input type="password" id="api-token-input" placeholder="Paste your 511 API Token" class="w-full p-3 border border-gray-700 rounded-md bg-gray-900 text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500">
+        <button id="save-token-button" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+            Save Token & Load Departures
+        </button>
+        <p id="token-error" class="text-red-400 text-sm mt-3 text-center h-4"></p>
+    </div>
+
+    <div id="dashboard-section" class="w-full max-w-5xl p-4 sm:p-6 bg-gray-800 rounded-lg shadow-xl hidden">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <div class="text-center md:text-left">
+                <h1 class="text-2xl sm:text-3xl font-bold text-white">MacArthur Station</h1>
+                <p class="text-gray-400">Real-Time Departures (All Platforms)</p>
+            </div>
+            <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                 <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <label for="interval-select" class="text-sm text-gray-300 flex-shrink-0">Refresh Interval:</label>
+                    <select id="interval-select" class="bg-gray-700 border border-gray-600 text-gray-100 text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2.5 w-full">
+                        <option value="30000">30 seconds</option>
+                        <option value="60000">1 minute</option>
+                        <option value="120000">2 minutes</option>
+                    </select>
+                </div>
+                <button id="refresh-now-button" class="text-sm bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-50 w-full sm:w-auto">
+                    Refresh Now
+                </button>
+                <button id="change-token-button" class="text-sm bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2.5 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50 w-full sm:w-auto">
+                    Change API Token
+                </button>
+            </div>
+        </div>
+
+        <div id="status-message" class="text-center text-gray-300 my-4 h-5"></div>
+        
+        <div id="departures-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+            </div>
+
+        <p class="text-xs text-gray-500 mt-6 text-center">Last updated: <span id="last-updated">Never</span></p>
+    </div>
+
+    <script>
+        // --- START OF JAVASCRIPT CODE ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const API_KEY_SESSION_STORAGE_KEY = 'bart_api_token_macarthur_v9_southfirst'; 
+            const MACARTHUR_PLATFORM_CODES = ['900301', '900302', '900303', '900304']; 
+            const REFRESH_INTERVAL_KEY = 'bart_refresh_interval_v9';
+
+            const tokenSection = document.getElementById('token-section');
+            const apiTokenInput = document.getElementById('api-token-input');
+            const saveTokenButton = document.getElementById('save-token-button');
+            const tokenError = document.getElementById('token-error');
+            const dashboardSection = document.getElementById('dashboard-section');
+            const departuresGrid = document.getElementById('departures-grid');
+            const statusMessage = document.getElementById('status-message');
+            const lastUpdatedSpan = document.getElementById('last-updated');
+            const changeTokenButton = document.getElementById('change-token-button');
+            const intervalSelect = document.getElementById('interval-select');
+            const refreshNowButton = document.getElementById('refresh-now-button');
+
+            let apiKey = sessionStorage.getItem(API_KEY_SESSION_STORAGE_KEY);
+            let refreshIntervalId = null;
+            let currentFetchController = null; 
+            let currentRefreshInterval = parseInt(sessionStorage.getItem(REFRESH_INTERVAL_KEY) || "60000", 10); // Default to 1 minute
+            intervalSelect.value = currentRefreshInterval;
+
+            const ALL_LINES_META = [
+                { key: "Red Line", colorClass: "bg-red-500", lineRefKeywords: ["RED"] },
+                { key: "Yellow Line", colorClass: "bg-yellow-400", lineRefKeywords: ["YELLOW", "YL"] },
+                { key: "Orange Line", colorClass: "bg-orange-500", lineRefKeywords: ["ORANGE", "ORNG"] },
+                { key: "Blue Line", colorClass: "bg-blue-500", lineRefKeywords: ["BLUE"] },
+                { key: "Green Line", colorClass: "bg-green-500", lineRefKeywords: ["GREEN", "GRN"] }
+            ];
+            
+            function getBaseLineKey(lineRef, publishedLineName) {
+                const upperLineRef = lineRef ? lineRef.toUpperCase() : '';
+                for (const meta of ALL_LINES_META) {
+                    if (meta.lineRefKeywords.some(keyword => upperLineRef.includes(keyword))) {
+                        return meta.key;
+                    }
+                }
+                if (publishedLineName) {
+                    const upperPublishedName = publishedLineName.toUpperCase();
+                    if (upperPublishedName.includes("RED") || (upperPublishedName.includes("RICHMOND") && (upperPublishedName.includes("MILLBRAE") || upperPublishedName.includes("SFO")))) return "Red Line";
+                    if (upperPublishedName.includes("YELLOW") || (upperPublishedName.includes("ANTIOCH") && (upperPublishedName.includes("SFO") || upperPublishedName.includes("MILLBRAE")))) return "Yellow Line";
+                    if (upperPublishedName.includes("ORANGE") || (upperPublishedName.includes("BERRYESSA") && upperPublishedName.includes("RICHMOND"))) return "Orange Line";
+                    if (upperPublishedName.includes("BLUE") || (upperPublishedName.includes("DUBLIN") && upperPublishedName.includes("DALY CITY"))) return "Blue Line";
+                    if (upperPublishedName.includes("GREEN") || (upperPublishedName.includes("BERRYESSA") && upperPublishedName.includes("DALY CITY"))) return "Green Line";
+                }
+                return "Other Lines"; 
+            }
+
+            // Helper to determine if a direction is considered "South/West"
+            function isSouthOrWest(directionRef) {
+                return directionRef === 'S' || directionRef === 'W';
+            }
+
+            function setupRefreshIntervalTimer() {
+                if (refreshIntervalId) clearInterval(refreshIntervalId);
+                if (apiKey && dashboardSection.offsetParent !== null) { 
+                     refreshIntervalId = setInterval(fetchAndDisplayDepartures, currentRefreshInterval);
+                }
+            }
+            
+            intervalSelect.addEventListener('change', (event) => {
+                currentRefreshInterval = parseInt(event.target.value, 10);
+                sessionStorage.setItem(REFRESH_INTERVAL_KEY, currentRefreshInterval.toString());
+                if (dashboardSection.classList.contains('hidden')) return; 
+                statusMessage.textContent = `Refresh interval: ${currentRefreshInterval / 1000}s. Updating...`;
+                fetchAndDisplayDepartures(); 
+                setupRefreshIntervalTimer(); 
+            });
+
+            refreshNowButton.addEventListener('click', () => {
+                if (apiKey) {
+                    statusMessage.textContent = 'Refreshing manually...';
+                    fetchAndDisplayDepartures();
+                } else {
+                    statusMessage.textContent = 'Please enter API token first.';
+                }
+            });
+
+            function initializeApp() {
+                apiKey = sessionStorage.getItem(API_KEY_SESSION_STORAGE_KEY); 
+                currentRefreshInterval = parseInt(sessionStorage.getItem(REFRESH_INTERVAL_KEY) || "60000", 10); // Default to 1 minute
+                intervalSelect.value = currentRefreshInterval;
+
+                if (apiKey) {
+                    tokenSection.classList.add('hidden');
+                    dashboardSection.classList.remove('hidden');
+                    fetchAndDisplayDepartures();
+                    setupRefreshIntervalTimer();
+                } else {
+                    tokenSection.classList.remove('hidden');
+                    dashboardSection.classList.add('hidden');
+                    apiTokenInput.value = ''; 
+                    if (refreshIntervalId) clearInterval(refreshIntervalId);
+                }
+            }
+
+            saveTokenButton.addEventListener('click', () => {
+                const token = apiTokenInput.value.trim();
+                if (token) {
+                    sessionStorage.setItem(API_KEY_SESSION_STORAGE_KEY, token);
+                    apiKey = token; 
+                    tokenError.textContent = '';
+                    initializeApp();
+                } else {
+                    tokenError.textContent = 'Please enter a valid API token.';
+                    apiTokenInput.focus();
+                }
+            });
+            
+            apiTokenInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    saveTokenButton.click();
+                }
+            });
+
+            changeTokenButton.addEventListener('click', () => {
+                sessionStorage.removeItem(API_KEY_SESSION_STORAGE_KEY);
+                apiKey = null;
+                if (refreshIntervalId) clearInterval(refreshIntervalId);
+                departuresGrid.innerHTML = ''; 
+                lastUpdatedSpan.textContent = 'Never';
+                statusMessage.textContent = '';
+                initializeApp(); 
+            });
+
+            async function fetchAndDisplayDepartures() {
+                if (!apiKey) {
+                    statusMessage.textContent = 'API Token is missing.';
+                    return;
+                }
+                
+                if (!statusMessage.textContent.toLowerCase().includes('error') && !statusMessage.textContent.toLowerCase().includes('interval set')) {
+                    statusMessage.textContent = 'Loading departures...';
+                }
+                statusMessage.classList.add('loading-pulse');
+
+                if (currentFetchController) {
+                    currentFetchController.abort();
+                }
+                currentFetchController = new AbortController();
+                const { signal } = currentFetchController; 
+                
+                const platformFetchPromises = MACARTHUR_PLATFORM_CODES.map((platformCode) => { 
+                    const apiUrl = `https://api.511.org/transit/StopMonitoring?api_key=${apiKey}&agency=BA&stopCode=${platformCode}&format=json`;
+                    return fetch(apiUrl, { signal, headers: { 'Accept': 'application/json' } })
+                        .then(response => {
+                            if (signal.aborted) throw new Error('Aborted'); 
+                            if (response.status === 401 || response.status === 403) {
+                                throw new Error(`Token unauthorized for platform ${platformCode}`);
+                            }
+                            if (!response.ok) {
+                                console.warn(`API request for platform ${platformCode} failed: ${response.status}`);
+                                return null; 
+                            }
+                            return response.json();
+                        })
+                        .then(responseData => { 
+                            if (responseData) {
+                                const visits = responseData?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit;
+                                if (visits && Array.isArray(visits)) {
+                                    visits.forEach(visit => {
+                                        visit.originPlatformCode = platformCode; 
+                                        if (visit.MonitoredVehicleJourney && visit.MonitoredVehicleJourney.MonitoredCall) {
+                                            visit.MonitoredVehicleJourney.MonitoredCall.apiStopPointName = visit.MonitoredVehicleJourney.MonitoredCall.StopPointName;
+                                        }
+                                    });
+                                }
+                            }
+                            return responseData;
+                        })
+                        .catch(error => {
+                            if (error.name !== 'AbortError' && !signal.aborted) {
+                                console.warn(`Network or other error for platform ${platformCode}:`, error);
+                            }
+                            return null; 
+                        });
+                });
+
+                try {
+                    const platformResponses = await Promise.all(platformFetchPromises);
+
+                    if (signal.aborted) { 
+                        statusMessage.textContent = 'Refresh cancelled.';
+                        statusMessage.classList.remove('loading-pulse');
+                        return;
+                    }
+                    
+                    let combinedMonitoredStopVisits = [];
+                    let anyPlatformSuccessful = false;
+                    let firstResponseTimestamp = null; 
+
+                    platformResponses.forEach(responseData => {
+                        if (responseData) { 
+                            anyPlatformSuccessful = true;
+                            if (!firstResponseTimestamp) {
+                                firstResponseTimestamp = responseData?.ServiceDelivery?.ResponseTimestamp;
+                            }
+                            const visits = responseData?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit;
+                            if (visits && Array.isArray(visits)) {
+                                combinedMonitoredStopVisits.push(...visits);
+                            }
+                        }
+                    });
+                    
+                    statusMessage.classList.remove('loading-pulse'); 
+
+                    const unauthorizedError = platformResponses.find(p => p instanceof Error && p.message.includes("Token unauthorized"));
+                    if (unauthorizedError) {
+                        statusMessage.textContent = 'Invalid or unauthorized API Token.';
+                        sessionStorage.removeItem(API_KEY_SESSION_STORAGE_KEY); 
+                        apiKey = null;
+                        initializeApp(); 
+                        return;
+                    }
+
+                    const finalDataForDisplay = {
+                        ServiceDelivery: {
+                            ResponseTimestamp: firstResponseTimestamp || new Date().toISOString(),
+                            ProducerRef: "BA", 
+                            Status: anyPlatformSuccessful, 
+                            StopMonitoringDelivery: {
+                                version: "1.4", 
+                                ResponseTimestamp: firstResponseTimestamp || new Date().toISOString(),
+                                Status: anyPlatformSuccessful,
+                                MonitoredStopVisit: combinedMonitoredStopVisits
+                            }
+                        }
+                    };
+                    
+                    displayDepartures(finalDataForDisplay);
+                    lastUpdatedSpan.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    if (statusMessage.textContent.startsWith('Loading') || statusMessage.textContent.startsWith('Refresh') || statusMessage.textContent.startsWith('Updating')) {
+                        statusMessage.textContent = '';
+                    }
+
+                } catch (error) { 
+                    statusMessage.classList.remove('loading-pulse');
+                    if (error.name === 'AbortError') { 
+                        return;
+                    }
+                    console.error('Error processing platform data:', error);
+                    statusMessage.textContent = `Error: ${error.message || 'Could not process platform data.'}`;
+                } finally {
+                    currentFetchController = null; 
+                }
+            }
+
+            function displayDepartures(data) { 
+                const visits = data?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit;
+                
+                const processedDepartures = (visits || []).map(visit => {
+                    const journey = visit.MonitoredVehicleJourney;
+                    if (!journey || !journey.MonitoredCall) return null;
+                    const call = journey.MonitoredCall;
+                    const departureTimeStr = call.ExpectedDepartureTime || call.AimedDepartureTime;
+                    if (!departureTimeStr) return null; 
+
+                    const departureTime = new Date(departureTimeStr);
+                    const now = new Date();
+                    const minutesUntilDeparture = Math.max(0, Math.floor((departureTime - now) / 60000));
+
+                    return {
+                        destination: journey.DestinationName || 'N/A',
+                        lineRef: journey.LineRef, 
+                        publishedLineName: journey.PublishedLineName || journey.LineRef, 
+                        minutes: minutesUntilDeparture,
+                        directionRef: journey.DirectionRef,
+                        apiStopPointName: call.apiStopPointName || call.StopPointName || 'N/A', 
+                        originPlatformCode: visit.originPlatformCode 
+                    };
+                }).filter(dep => dep !== null) 
+                  .sort((a, b) => { 
+                      if (a.minutes !== b.minutes) return a.minutes - b.minutes;
+                      return (a.originPlatformCode || "").localeCompare(b.originPlatformCode || "");
+                  }); 
+
+                const groupedByLineThenDestination = processedDepartures.reduce((acc, dep) => {
+                    const baseLineKey = getBaseLineKey(dep.lineRef, dep.publishedLineName);
+                    const destinationKey = dep.destination || 'Unknown Destination';
+
+                    if (!acc[baseLineKey]) acc[baseLineKey] = {};
+                    if (!acc[baseLineKey][destinationKey]) acc[baseLineKey][destinationKey] = { departures: [], directionRef: dep.directionRef }; 
+                    
+                    acc[baseLineKey][destinationKey].departures.push(dep);
+                    if (!acc[baseLineKey][destinationKey].directionRef || acc[baseLineKey][destinationKey].directionRef === 'OTHER') {
+                        acc[baseLineKey][destinationKey].directionRef = dep.directionRef;
+                    }
+
+                    return acc;
+                }, {});
+
+                departuresGrid.innerHTML = ''; 
+
+                if (processedDepartures.length === 0) { 
+                     const noDeparturesMessage = document.createElement('div');
+                    noDeparturesMessage.className = 'text-center py-6 text-gray-400 sm:col-span-2 lg:col-span-3';
+                    noDeparturesMessage.textContent = `No upcoming departures found for MacArthur station from any platform.`;
+                    departuresGrid.appendChild(noDeparturesMessage);
+                    return;
+                }
+
+                ALL_LINES_META.forEach(lineMeta => { 
+                    const columnDiv = document.createElement('div');
+                    columnDiv.className = 'bg-gray-700 p-3 sm:p-4 rounded-lg shadow-lg flex flex-col column-min-height';
+
+                    const headerDiv = document.createElement('div');
+                    headerDiv.className = 'flex items-center mb-1 border-b border-gray-600 pb-2 flex-shrink-0';
+                    
+                    const colorIndicator = document.createElement('span');
+                    colorIndicator.className = `line-color-indicator ${lineMeta.colorClass}`;
+                    
+                    const lineNameHeader = document.createElement('h3');
+                    lineNameHeader.className = 'text-lg font-semibold text-white truncate';
+                    lineNameHeader.textContent = lineMeta.key; 
+                    lineNameHeader.title = lineMeta.key;
+
+                    headerDiv.appendChild(colorIndicator);
+                    headerDiv.appendChild(lineNameHeader);
+                    columnDiv.appendChild(headerDiv);
+
+                    const departuresColumnContent = document.createElement('div');
+                    departuresColumnContent.className = 'overflow-y-auto departures-sub-section-content flex-grow pt-1';
+
+                    const destinationsForLine = groupedByLineThenDestination[lineMeta.key] || {};
+                    let contentDisplayedInColumn = false;
+
+                    const sortedDestinationKeys = Object.keys(destinationsForLine).sort((a, b) => {
+                        const dirA = destinationsForLine[a].directionRef;
+                        const dirB = destinationsForLine[b].directionRef;
+                        const isSouthA = isSouthOrWest(dirA);
+                        const isSouthB = isSouthOrWest(dirB);
+
+                        if (isSouthA && !isSouthB) return -1; 
+                        if (!isSouthA && isSouthB) return 1;  
+                        
+                        return a.localeCompare(b);
+                    });
+
+                    sortedDestinationKeys.forEach(destinationKey => { 
+                        const destinationGroup = destinationsForLine[destinationKey];
+                        const departuresToDestination = destinationGroup.departures;
+
+                        if (departuresToDestination && departuresToDestination.length > 0) {
+                            contentDisplayedInColumn = true;
+                            
+                            const destinationHeaderEl = document.createElement('h4');
+                            destinationHeaderEl.className = 'destination-subheader mb-1.5 text-gray-300';
+                            destinationHeaderEl.textContent = destinationKey; 
+                            departuresColumnContent.appendChild(destinationHeaderEl);
+
+                            const destinationItemsContainer = document.createElement('div');
+                            destinationItemsContainer.className = 'space-y-2 sm:space-y-3 pb-2';
+                            departuresToDestination.forEach(dep => {
+                                const departureElement = document.createElement('div');
+                                departureElement.className = 'flex items-center justify-between p-2.5 sm:p-3 bg-gray-600 hover:bg-gray-500 transition-colors duration-150 rounded-md shadow';
+                                
+                                const platformInfoDiv = document.createElement('div');
+                                platformInfoDiv.className = 'flex-grow overflow-hidden mr-2';
+                                const platformSpan = document.createElement('span');
+                                platformSpan.className = 'font-medium text-sm sm:text-base text-gray-100 truncate';
+                                
+                                let displayPlatformText = 'N/A';
+                                if (dep.originPlatformCode) {
+                                    const lastDigit = dep.originPlatformCode.slice(-1);
+                                    displayPlatformText = `Platform ${lastDigit}`; // Changed "Plat" to "Platform"
+                                }
+                                platformSpan.textContent = displayPlatformText;
+                                platformSpan.title = `Platform Code: ${dep.originPlatformCode}, API StopPointName: ${dep.apiStopPointName}`;
+                                platformInfoDiv.appendChild(platformSpan);
+
+                                const timeDiv = document.createElement('div');
+                                timeDiv.className = 'flex-shrink-0 text-right';
+                                const minutesSpan = document.createElement('span');
+                                minutesSpan.className = 'text-md sm:text-lg font-bold text-white block';
+                                if (dep.minutes <= 0) {
+                                    minutesSpan.textContent = 'NOW';
+                                    minutesSpan.classList.add('text-green-400');
+                                } else if (dep.minutes === 1) {
+                                    minutesSpan.textContent = '1 min';
+                                } else {
+                                    minutesSpan.textContent = `${dep.minutes} min`;
+                                }
+                                timeDiv.appendChild(minutesSpan);
+                                
+                                departureElement.appendChild(platformInfoDiv); 
+                                departureElement.appendChild(timeDiv); 
+                                destinationItemsContainer.appendChild(departureElement);
+                            });
+                            departuresColumnContent.appendChild(destinationItemsContainer);
+                        }
+                    });
+                    
+                    if (!contentDisplayedInColumn) {
+                        const noDeparturesMsg = document.createElement('p');
+                        noDeparturesMsg.className = 'text-gray-400 text-sm italic p-3 text-center';
+                        noDeparturesMsg.textContent = 'No current departures for this line.';
+                        departuresColumnContent.appendChild(noDeparturesMsg);
+                    }
+
+                    columnDiv.appendChild(departuresColumnContent);
+                    departuresGrid.appendChild(columnDiv);
+                });
+            }
+            initializeApp();
+        });
+        // --- END OF JAVASCRIPT CODE ---
+    </script>
+</body>
+</html>
